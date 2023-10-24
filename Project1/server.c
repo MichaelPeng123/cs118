@@ -207,8 +207,9 @@ void serve_local_file(int client_socket, const char *path) {
             dne_response,
             "HTTP/1.0 404 Not Found\r\n"
             "Content-Type: text/html; charset=utf-8\r\n"
-            "Content-Length: 0\r\n"
+            "Content-Length: 13\r\n"
             "\r\n"
+            "404 Not Found"
         );
         send(client_socket, dne_response, strlen(dne_response), 0);
         return;
