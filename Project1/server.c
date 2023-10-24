@@ -198,6 +198,21 @@ void serve_local_file(int client_socket, const char *path) {
     // * Generate a correct response
 
     char* content_type;
+    if (access(path, F_OK) == 0) {
+        // file exists
+    } else {
+        char dne_response[100];
+
+        sprintf(
+            dne_response,
+            "HTTP/1.0 404 Not Found\r\n"
+            "Content-Type: text/html; charset=utf-8\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n"
+        );
+        send(client_socket, dne_response, strlen(dne_response), 0);
+        return;
+    }
 
     if (endMatches(path, ".html")) {
         content_type = "text/html; charset=utf-8";
