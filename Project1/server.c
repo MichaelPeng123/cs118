@@ -161,6 +161,16 @@ void handle_request(struct server_app *app, int client_socket) {
     // Hint: if the requested path is "/" (root), default to index.html
     char *split_file = strtok(request, " ");
     split_file = strtok(NULL, " ");
+    char *file_ptr = split_file;
+
+    while(*file_ptr != '\0') {
+        if (strncmp(file_ptr, "%20", 3) == 0) {
+            *file_ptr++ = ' ';
+            memmove(file_ptr, file_ptr + 2, strlen(file_ptr + 2) + 1);
+        } else {
+            file_ptr++;
+        }
+    }
 
     if (split_file[0] == '/'){
         split_file += 1;
@@ -175,13 +185,11 @@ void handle_request(struct server_app *app, int client_socket) {
 
     // TODO: Implement proxy and call the function under condition
     // specified in the spec
-    // if (endMatches(split_file, ".ts")) {
-        // printf("hi!\n\n" );
-    // }
-    //     proxy_remote_file(app, client_socket, request);
-    // } else {
+    if (endMatches(split_file, ".ts")) {
+        proxy_remote_file(app, client_socket, request);
+    } else {
         serve_local_file(client_socket, split_file);
-    // }
+    }
 }
 
 
@@ -209,7 +217,7 @@ void serve_local_file(int client_socket, const char *path) {
             "Content-Type: text/html; charset=utf-8\r\n"
             "Content-Length: 13\r\n"
             "\r\n"
-            "404 Not Found"
+            "404 No "
         );
         send(client_socket, dne_response, strlen(dne_response), 0);
         return;
@@ -269,6 +277,20 @@ void proxy_remote_file(struct server_app *app, int client_socket, const char *re
     // * When connection to the remote server fail, properly generate
     // HTTP 502 "Bad Gateway" response
     printf("%s", request);
+
+    struct sockaddr_in remote_addr;
+    int remote_socket = socket(AF_INET, SOCK_STREAM, 0);
+
+    if (remote_socket == -1) {
+        perror("socket failed");
+        exit(EXIT_FAILURE);
+    }
+
+    remote_addr.sin_family = AF_INET;
+    remote_addr.sin_addr.s_addr = inet_addr(app->remote_host);
+    remote_addr.sin_port = htons(app->remote_port);
+
+    
 
     char response[] = "HTTP/1.0 501 Not Implemented\r\n\r\n";
     send(client_socket, response, strlen(response), 0);
