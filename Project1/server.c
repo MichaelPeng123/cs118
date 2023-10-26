@@ -290,8 +290,35 @@ void proxy_remote_file(struct server_app *app, int client_socket, const char *re
     remote_addr.sin_addr.s_addr = inet_addr(app->remote_host);
     remote_addr.sin_port = htons(app->remote_port);
 
-    
+    if (connect(remote_socket, (struct sockaddr*)&remote_addr, sizeof(remote_addr)) == -1) {
+        perror("connect failed");
+        close(remote_socket);
+        exit(EXIT_FAILURE);
+    }
 
-    char response[] = "HTTP/1.0 501 Not Implemented\r\n\r\n";
-    send(client_socket, response, strlen(response), 0);
+    send(remote_socket, request, strlen(request), 0);
+
+    char buffer[BUFFER_SIZE];
+    ssize_t bytes_read;
+    bytes_read = recv(remote_socket, buffer, sizeof(buffer) - 1, 0);
+    if (bytes_read <= 0) {
+        return;  // Connection closed or error
+    }
+
+    buffer[bytes_read] = '\0';
+
+    char *response = malloc(strlen(buffer) + 1);
+    strcpy(response, buffer);
+
+    close(remote_socket);
+    int send_response;
+    send_response = send(client_socket, response, strlen(response), 0);
+    if (send_response == -1) {
+        perror("send failed");
+        exit(EXIT_FAILURE);
+    }
+
+
+    // char response[] = "HTTP/1.0 501 Not Implemented\r\n\r\n";
+    // send(client_socket, response, strlen(response), 0);
 }
