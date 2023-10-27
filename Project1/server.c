@@ -167,7 +167,12 @@ void handle_request(struct server_app *app, int client_socket) {
         if (strncmp(file_ptr, "%20", 3) == 0) {
             *file_ptr++ = ' ';
             memmove(file_ptr, file_ptr + 2, strlen(file_ptr + 2) + 1);
-        } else {
+        }
+        else if (strncmp(file_ptr, "%25", 3) == 0) {
+            *file_ptr++ = '%';
+            memmove(file_ptr, file_ptr + 2, strlen(file_ptr + 2) + 1);
+        }
+        else {
             file_ptr++;
         }
     }
