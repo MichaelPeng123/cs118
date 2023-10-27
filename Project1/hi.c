@@ -18,6 +18,7 @@
 #define DEFAULT_SERVER_PORT 8081
 #define DEFAULT_REMOTE_HOST "131.179.176.34"
 #define DEFAULT_REMOTE_PORT 5001
+#define ENOUGH 1000000
 
 struct server_app {
     // Parameters of the server
@@ -63,7 +64,6 @@ int main(int argc, char *argv[])
     // previous run exits recently
     int optval = 1;
     setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
-
     if (bind(server_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) == -1) {
         perror("bind failed");
         exit(EXIT_FAILURE);
@@ -123,17 +123,10 @@ void parse_args(int argc, char *argv[], struct server_app *app)
     }
 }
 
-bool endMatches(const char *path, const char *end) {
-    if (strlen(path) < strlen(end)){
-        return 0;
-    }
-
-    if (strcmp(path + strlen(path) - strlen(end), end) == 0) {
-        return 1;
-    }
-    else {
-        return 0;
-    }
+bool need_proxy(const char *file_name)
+{
+    int n = strlen(file_name); 
+   return file_name[n-1] == 's' && file_name[n-2] == 't' && file_name[n-3] == '.'; 
 }
 
 void handle_request(struct server_app *app, int client_socket) {
@@ -144,7 +137,7 @@ void handle_request(struct server_app *app, int client_socket) {
     // Note: This code is not ideal in the real world because it
     // assumes that the request header is small enough and can be read
     // once as a whole.
-    // However, the current version suffices for our testing.
+    // However, the curßrent version suffices for our testing.
     bytes_read = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
     if (bytes_read <= 0) {
         return;  // Connection closed or error
@@ -156,52 +149,72 @@ void handle_request(struct server_app *app, int client_socket) {
     strcpy(request, buffer);
     char* copy_req = malloc(strlen(request)+1); 
     strcpy(copy_req, request); 
-
-    printf("%s", request);
+ 
 
     // TODO: Parse the header and extract essential fields, e.g. file name
     // Hint: if the requested path is "/" (root), default to index.html
-    char *split_file = strtok(request, " ");
-    split_file = strtok(NULL, " ");
-    char *file_ptr = split_file;
-
-    while(*file_ptr != '\0') {
-        if (strncmp(file_ptr, "%20", 3) == 0) {
-            *file_ptr++ = ' ';
-            memmove(file_ptr, file_ptr + 2, strlen(file_ptr + 2) + 1);
-        }
-        else if (strncmp(file_ptr, "%25", 3) == 0) {
-            *file_ptr++ = '%';
-            memmove(file_ptr, file_ptr + 2, strlen(file_ptr + 2) + 1);
-        }
-        else {
-            file_ptr++;
-        }
+    char file_name[ENOUGH]; 
+    memset(file_name,0,strlen(file_name)); 
+    int ptr = 5;
+    while(request[ptr] !=  ' '){
+        strncat(file_name, &request[ptr], 1); 
+        ptr++;
     }
 
-    if (split_file[0] == '/'){
-        split_file += 1;
+   char* modified = (!strlen(file_name)) ? "index.html\0" : file_name; 
+   printf("FILE_NAMES IS %s\n", modified); 
+
+   
+   int i =0;
+   int j =0; 
+   int N = strlen(modified); 
+   char modified2[N];
+   printf("N is %d\n", N); 
+   while(i < N){
+    printf("%d\n", i); 
+    if(i+1 < N && i+2 < N){
+        
+        if(modified[i] == '%' && modified[i+1] == '2' && modified[i+2] == '0'){
+            modified2[j] = ' '; 
+            i+=3;
+        }
+        else if(modified[i] == '%' && modified[i+1] == '2' && modified[i+2] == '5'){
+            modified2[j] = '%'; 
+            i+=3;
+        }
+        else{
+            printf("%d\n", i);
+            modified2[j] = modified[i];
+            i++;
+        }
+
     }
-    if (split_file[0] == '\0') {
-        split_file = "index.html";
+    else{ modified2[j] = modified[i];
+            i++;}
+            j++; 
+   }
+   modified2[j] = '\0'; 
+   printf("FILE_NAME IS %s\n", modified2);
+    // TODO: Impßlement proxy and call the function under condition
+     // specified in the spec
+     if (need_proxy(modified2)) {
+        printf("NEED PROXY\n"); 
+        proxy_remote_file(app, client_socket, copy_req);
+     } else {
+        serve_local_file(client_socket, modified2);
     }
     
-    printf("%s\n\n", split_file);
-        
-    // char *split_file = "index.html";
+}
 
-    // TODO: Implement proxy and call the function under condition
-    // specified in the spec
-    if (endMatches(split_file, ".ts")) {
-        proxy_remote_file(app, client_socket, copy_req);
-    } else {
-        serve_local_file(client_socket, split_file);
+void concat(char* s, char* s1, int length1, int length2){
+
+    int i;
+    for (i = 0; i < length2; i++) {
+        s[i + length1] = s1[i];
     }
 }
 
-
 void serve_local_file(int client_socket, const char *path) {
-    printf("%s hi", path);
     // TODO: Properly implement serving of local files
     // The following code returns a dummy response for all requests
     // but it should give you a rough idea about what a proper response looks like
@@ -212,62 +225,75 @@ void serve_local_file(int client_socket, const char *path) {
     // * Also send file content
     // (When the requested file does not exist):
     // * Generate a correct response
+    printf("PATH IS %s\n", path); 
+    int p= 0 ;
+    int path_sz = strlen(path); 
 
-    char* content_type;
-    if (access(path, F_OK) == 0) {
-        // file exists
-    } else {
-        char dne_response[100];
-
-        sprintf(
-            dne_response,
-            "HTTP/1.0 404 Not Found\r\n"
-            "Content-Type: text/html; charset=utf-8\r\n"
-            "Content-Length: 13\r\n"
-            "\r\n"
-            "404 No "
-        );
-        send(client_socket, dne_response, strlen(dne_response), 0);
+    while(p < path_sz + 1 && path[p]!='.'){
+        p++;
+    }
+    char* file_ext = path + p + 1; 
+    //printf("%s\n", file_ext); 
+    
+    FILE* ptr;
+    char ch;
+    // Opening file in reading mode
+    char * buffer = 0;
+    long length;
+    FILE * f = fopen (path, "rb");
+    if(!f){
+        char g[] = "HTTP/1.0 404 NOT FOUND\r\n";
+        send(client_socket, g, strlen(g), 0);
         return;
     }
-
-    if (endMatches(path, ".html")) {
-        content_type = "text/html; charset=UTF-8";
-    }
-    else if (endMatches(path, ".txt")) {
-        content_type = "text/plain; charset=UTF-8";
-    }
-    else if (endMatches(path, ".jpg")){
-        content_type = "image/jpeg";
-    }
-    else {
-        content_type = "application/octet-stream";
-    }
-
-    FILE * file = fopen (path, "rb");
-
-    fseek(file, 0, SEEK_END);
-    long content_length = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    char *buffer = (char *)malloc(content_length + 1);
-    fread(buffer, 1, content_length, file);
-
-    char response[100];
     
-    sprintf(
-        response,
-        "HTTP/1.0 200 OK\r\n"
-        "Content-Type: %s\r\n"
-        "Content-Length: %ld\r\n"
-        "\r\n", content_type, content_length
-    );
+    fseek (f, 0, SEEK_END);
+    length = ftell (f);
+    fseek (f, 0, SEEK_SET);
+    buffer = malloc (length);
+    if (buffer)
+    {
+        fread (buffer, 1, length, f);
+    }
+    fclose (f);
 
-    send(client_socket, response, strlen(response), 0);
-    send(client_socket, buffer, content_length, 0);
+    char * content_type; 
+    if(!strcmp(file_ext, "html\0")){
+        content_type = "Content-Type: text/html; charset=UTF-8\r\n"; 
+    }
+    else if(!strcmp(file_ext, "txt\0")){
+         content_type = "Content-Type: text/plain; charset=UTF-8\r\n"; 
+    }
+    else if(!strcmp(file_ext, "jpg\0")){
+        content_type = "Content-Type: image/jpeg\r\n"; 
+    }
+    else{
+        content_type = "Content-Type: application/octet-stream\r\n"; 
+        
+    }
+    char content_sz[ENOUGH]; 
+    sprintf(content_sz, "%d\r\n", length); 
+    char content_length[ENOUGH] ="Content-Length: "; 
+    strcat(content_length, content_sz);    
+    char response[ENOUGH];
+    memset(response,0,strlen(response)); 
+    strcat(response, "HTTP/1.0 200 OK\r\n"); 
+    strcat(response, content_type); 
+    strcat(response, content_length); 
+    strcat(response, "\r\n"); 
+    int header_len = strlen(response); 
+    concat(response, buffer, header_len, length); 
+    
+    char g[] = "HTTP/1.0 200 OK\r\n"
+                      "Content-Type: text/plain; charset=UTF-8\r\n"
+                      "Content-Length: 15\r\n"
+                      "\r\n"
+                      "Sample response";
+
+    send(client_socket, response, header_len + length, 0);
 }
 
 void proxy_remote_file(struct server_app *app, int client_socket, const char *message) {
-    printf("hello!");
     // TODO: Implement proxy request and replace the following code
     // What's needed:
     // * Connect to remote server (app->remote_server/app->remote_port)
@@ -276,56 +302,42 @@ void proxy_remote_file(struct server_app *app, int client_socket, const char *me
     // Bonus:
     // * When connection to the remote server fail, properly generate
     // HTTP 502 "Bad Gateway" response
-    char error_response[] = "HTTP/1.0 502 Bad Gateway\r\n\r\n";
-    
-
-    int remote_socket = socket(AF_INET, SOCK_STREAM, 0);
-    struct sockaddr_in remote_addr; 
-    int connected = 1;
-    
-    setsockopt(remote_socket, SOL_SOCKET, SO_REUSEADDR, &connected, sizeof(connected));
-    if (remote_socket == -1) {
-        send(client_socket, error_response, strlen(error_response), 0); 
-        // exit(EXIT_FAILURE);
-        close(remote_socket); 
+     struct sockaddr_in remote_addr; 
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    int on = 1;
+    setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
+    if (sockfd == -1) {
+       
+        char r[] = "HTTP/1.0 502 Bad Gateway\r\n\r\n";
+        send(client_socket, r, strlen(r), 0); 
+        
     }
 
     remote_addr.sin_family = AF_INET;
     remote_addr.sin_port = htons(app->remote_port);
-    if (inet_pton(AF_INET, app->remote_host, &remote_addr.sin_addr)<=0) {
-        // exit(EXIT_FAILURE);
-        send(client_socket, error_response, strlen(error_response), 0); 
-        close(remote_socket); 
+    if(inet_pton(AF_INET, app->remote_host, &remote_addr.sin_addr)<=0){
+            printf("Invalid Address\n");
+            close(sockfd); 
+            char r[] = "HTTP/1.0 502 Bad Gateway\r\n\r\n";
+            send(client_socket, r, strlen(r), 0); 
     }
-
-    // remote_addr.sin_family = AF_INET;
-    // remote_addr.sin_addr.s_addr = inet_addr(app->remote_host);
-    // remote_addr.sin_port = htons(app->remote_port);
-
-    // if (connect(remote_socket, (struct sockaddr*)&remote_addr, sizeof(remote_addr)) == -1) {
-    //     perror("connect failed");
-    //     close(remote_socket);
-    //     exit(EXIT_FAILURE);
-    // }
-
-    printf("Attempting to connect...\n"); 
-    if (connect(remote_socket,(struct sockaddr *)&remote_addr,sizeof(struct sockaddr_in)) < 0) {
-        // exit(EXIT_FAILURE);
-        send(client_socket, error_response, strlen(error_response), 0); 
-        close(remote_socket); 
+    printf("CONNECTING\n"); 
+     if (connect(sockfd,(struct sockaddr *)&remote_addr,sizeof(struct sockaddr_in)) < 0){
+        char r[] = "HTTP/1.0 502 Bad Gateway\r\n\r\n";
+        send(client_socket, r, strlen(r), 0); 
      }
     
-    send(remote_socket, message, strlen(message), 0); 
     
-    printf("Connection Successful!\n"); 
-    char buffer[1024]; 
-    // buffer[bytes_read] = '\0';
-    while(true){
-        ssize_t currRead = recv(remote_socket, buffer, sizeof(buffer), 0);
-        if (currRead > 0) {
-            send(client_socket, buffer, currRead, 0); 
-        }
-        else break;
+    //send the request 
+    printf("SENDING REQUEST\n%s\n", message); 
+    send(sockfd, message, strlen(message), 0); 
+    
+    // receive the response 
+    printf("RECEIVING RESPONSE\n"); 
+    char strData[1024]; 
+    ssize_t bytesRead;
+    while((bytesRead = recv(sockfd, strData, sizeof(strData), 0)) > 0){
+        send(client_socket, strData,bytesRead, 0); 
     }
-    close(remote_socket); 
+    close(sockfd); 
 }
