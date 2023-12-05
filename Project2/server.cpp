@@ -53,7 +53,42 @@ int main() {
 
     // TODO: Receive file from the client and save it as output.txt
 
-    
+    int window_size = WINDOW_SIZE;
+    struct packet window[window_size];
+    int window_base = 0;
+
+    while (1) {
+        recv_len = recvfrom(listen_sockfd, &buffer, sizeof(buffer), 0, (struct sockaddr *)&client_addr_from, &addr_size);
+        if (recv_len < 0) {
+            perror("Could not receive data");
+            close(listen_sockfd);
+            close(send_sockfd);
+            return 1;
+        }
+        printRecv(&buffer);
+
+        if (buffer.seqnum == expected_seq_num) {
+            // send ack
+            build_packet(&ack_pkt, 0, expected_seq_num, 0, 1, 0, "");
+            sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, sizeof(client_addr_to));
+            printSend(&ack_pkt, 0);
+
+            // write to file
+            fwrite(buffer.payload, 1, buffer.length, fp);
+
+            window_base++;
+
+            expected_seq_num = (expected_seq_num + 1) % MAX_SEQUENCE;
+            if (buffer.last) {
+                break;
+            }
+        } else {
+            // send ack
+            build_packet(&ack_pkt, 0, (expected_seq_num - 1) % MAX_SEQUENCE, 0, 1, 0, "");
+            sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, sizeof(client_addr_to));
+            printSend(&ack_pkt, 0);
+        }
+    }
 
     fclose(fp);
     close(listen_sockfd);

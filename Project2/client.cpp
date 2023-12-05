@@ -71,7 +71,89 @@ int main(int argc, char *argv[]) {
     }
 
     // TODO: Read from file, and initiate reliable data transfer to the server
+    int window_size = WINDOW_SIZE;
+    struct packet window[window_size];
+    int window_base = 0;
+    int next_seq_num = 0;
 
+    while (1) {
+        // Read data from the file
+        int bytes_read = fread(buffer, 1, PAYLOAD_SIZE, fp);
+        if (bytes_read <= 0) {
+            break; // End of file
+        }
+
+        // Create a packet
+        build_packet(&pkt, next_seq_num, 0, (bytes_read == 0), 0, bytes_read, buffer);
+
+        // Send the packet
+        sendto(send_sockfd, &pkt, sizeof(pkt), 0, (struct sockaddr *)&server_addr_to, sizeof(server_addr_to));
+
+        // Move the window
+        window_base++;
+        next_seq_num = (next_seq_num + 1) % MAX_SEQUENCE;
+
+        // Receive acknowledgments and update the window
+        int recv_len = recvfrom(listen_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&server_addr_from, &addr_size);
+        if (recv_len < 0) {
+            perror("Receive error");
+            break;
+        }
+
+        // Receive acknowledgments and update the window
+        int ack_received = 0;
+        while (1) {
+            // Check for timeouts
+            fd_set readfds;
+            FD_ZERO(&readfds);
+            FD_SET(listen_sockfd, &readfds);
+
+            struct timeval timeout;
+            timeout.tv_sec = TIMEOUT;
+            timeout.tv_usec = 0;
+
+            if (select(listen_sockfd + 1, &readfds, NULL, NULL, &timeout) == 0) {
+                // Timeout occurred, retransmit the packets in the window
+                for (int i = window_base; i < window_base + window_size; i++) {
+                    int index = i % window_size;
+                    if (window[index].seqnum != -1) {
+                        // Retransmit the packet
+                        sendto(send_sockfd, &window[index], sizeof(window[index]), 0,
+                               (struct sockaddr *)&server_addr_to, sizeof(server_addr_to));
+                        printSend(&window[index], 1);  // Log the retransmission
+                    }
+                }
+            }
+
+            // Receive acknowledgment
+            recv_len = recvfrom(listen_sockfd, &ack_pkt, sizeof(ack_pkt), 0,
+                                (struct sockaddr *)&server_addr_from, &addr_size);
+            if (recv_len < 0) {
+                perror("Receive error");
+                break;
+            }
+
+            // Process the acknowledgment
+            int acked_seq_num = ack_pkt.acknum;
+            if (acked_seq_num >= window_base && acked_seq_num < window_base + window_size) {
+                int index = acked_seq_num % window_size;
+                // Mark the corresponding packet as acknowledged
+                window[index].seqnum = -1;
+
+                // Move the window base
+                while (window_base < window_base + window_size && window[window_base % window_size].seqnum == -1) {
+                    window_base++;
+                }
+
+                ack_received = 1;
+            }
+        }
+
+        // Check if the last packet has been acknowledged
+        if (window_base > next_seq_num) {
+            break;
+        }
+    }
  
     
     fclose(fp);
