@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <sys/time.h>
 
 // MACROS
 #define SERVER_IP "127.0.0.1"
@@ -52,13 +51,6 @@ void printSend(struct packet* pkt, int resend) {
         printf("RESEND %d %d%s%s\n", pkt->seqnum, pkt->acknum, pkt->last ? " LAST": "", pkt->ack ? " ACK": "");
     else
         printf("SEND %d %d%s%s\n", pkt->seqnum, pkt->acknum, pkt->last ? " LAST": "", pkt->ack ? " ACK": "");
-}
-
-int timeout(double startTime) {
-    struct timeval curr_tv;
-    gettimeofday(&curr_tv, NULL);
-    double currTime = curr_tv.tv_sec + curr_tv.tv_usec/1000000.0;
-    return (currTime - startTime >= TIMEOUT);
 }
 
 #endif

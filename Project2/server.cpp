@@ -72,10 +72,15 @@ int main() {
 
         while (server_buffer[expected_seq_num].length) {
             fwrite(server_buffer[expected_seq_num].payload, 1, server_buffer[expected_seq_num].length, fp);
-            expected_seq_num++;
+            
+            printf("Wrote packet with seqnum %d\n", server_buffer[expected_seq_num].seqnum);
             if (server_buffer[expected_seq_num].last) {
-                break;
+                fclose(fp);
+                close(listen_sockfd);
+                close(send_sockfd);
+                return 0;
             }
+            expected_seq_num++;
         }
     }
 
