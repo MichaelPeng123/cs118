@@ -50,8 +50,18 @@ int main() {
 
     // Open the target file for writing (always write to output.txt)
     FILE *fp = fopen("output.txt", "wb");
+    printf("receieved packdet\n");
 
     // TODO: Receive file from the client and save it as output.txt
+    while (1) {
+        recv_len = recvfrom(listen_sockfd, &buffer, sizeof(buffer), 0, (struct sockaddr *)&client_addr_from, &addr_size);
+        if (recv_len == -1) {
+            perror("Error retrieving packet");
+            close(listen_sockfd);
+            close(send_sockfd);
+        }
+        printf("%s", buffer.payload);
+    }
 
     
 

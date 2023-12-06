@@ -70,11 +70,34 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // TODO: Read from file, and initiate reliable data transfer to the server
+    fseek(fp, 0, SEEK_END);
+    int file_size = ftell(fp);
+    rewind(fp);
 
- 
-    
+    struct packet all_packets[file_size / PAYLOAD_SIZE + 1];
+    int bytes_read;
+
+    // TODO: Read from file, and initiate reliable data transfer to the server
+    while (1) {
+        bytes_read = fread(buffer, 1, PAYLOAD_SIZE, fp);
+        if (bytes_read < PAYLOAD_SIZE) {
+            last = 1;
+            build_packet(&pkt, seq_num, ack_num, last, ack, bytes_read, (const char*) buffer);
+            break;
+        }
+        build_packet(&pkt, seq_num, ack_num, last, ack, bytes_read, (const char*) buffer);
+        all_packets[seq_num] = pkt;
+        seq_num++;
+    }
+
     fclose(fp);
+
+    for (packet packet_to_send : all_packets) {
+        sendto(send_sockfd, &packet_to_send, sizeof(packet_to_send), 0, (struct sockaddr *)&server_addr_to, addr_size);
+    }
+    // packet packet_to_send = all_packets[0];
+    // sendto(send_sockfd, &packet_to_send, sizeof(packet_to_send), 0, (struct sockaddr *)&server_addr_to, addr_size);
+
     close(listen_sockfd);
     close(send_sockfd);
     return 0;
