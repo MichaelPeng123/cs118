@@ -17,6 +17,7 @@
 #define WINDOW_SIZE 5
 #define TIMEOUT 1
 #define MAX_SEQUENCE 1024
+#define BUFFER_SIZE 4096
 
 
 

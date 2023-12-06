@@ -81,14 +81,18 @@ int main(int argc, char *argv[]) {
 
     // TODO: Read from file, and initiate reliable data transfer to the server
     while (1) {
+        fseek(fp, (seq_num * PAYLOAD_SIZE), SEEK_SET);
         bytes_read = fread(buffer, 1, PAYLOAD_SIZE, fp);
         if (bytes_read < PAYLOAD_SIZE) {
             last = 1;
+            buffer[bytes_read] = '\0';
         }
-        build_packet(&pkt, seq_num, ack_num, last, ack, bytes_read, (const char*) buffer);
+        build_packet(&pkt, seq_num, ack_num, last, ack, bytes_read, buffer);
+         if (last == 1) {
+            memcpy(pkt.payload, buffer, PAYLOAD_SIZE);
+        }
         sendto(send_sockfd, &pkt, sizeof(pkt), 0, (struct sockaddr *)&server_addr_to, addr_size);
         all_packets[seq_num] = pkt;
-        
 
         tv.tv_sec = TIMEOUT;
         tv.tv_usec = 0;
@@ -113,7 +117,6 @@ int main(int argc, char *argv[]) {
     }
 
 
- 
     fclose(fp);
     close(listen_sockfd);
     close(send_sockfd);

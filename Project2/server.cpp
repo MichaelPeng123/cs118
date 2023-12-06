@@ -51,31 +51,33 @@ int main() {
     // Open the target file for writing (always write to output.txt)
     FILE *fp = fopen("output.txt", "wb");
 
-    struct packet server_buffer;
+    struct packet server_buffer[BUFFER_SIZE];
 
     // TODO: Receive file from the client and save it as output.txt
     while (1) {
-        recv_len = recvfrom(listen_sockfd, &buffer, sizeof(buffer), 0, (struct sockaddr *)&client_addr_from, &addr_size);
-        if (recv_len == -1) {
+        if (recvfrom(listen_sockfd, &buffer, sizeof(buffer), 0, (struct sockaddr *)&client_addr_from, &addr_size) == -1) {
             perror("Error retrieving packet");
             close(listen_sockfd);
             close(send_sockfd);
         }
         printf("Received packet with seqnum %d\n", buffer.seqnum);
+        server_buffer[buffer.seqnum] = buffer;
         if (expected_seq_num == buffer.seqnum) {
-            printf("Writing to file\n");
-            fwrite(buffer.payload, sizeof(char), buffer.length, fp); 
-
-            build_packet(&ack_pkt, 0, expected_seq_num, 0, 1, 0, "");
-            expected_seq_num++;
-            sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, sizeof(client_addr_to));
+            build_packet(&ack_pkt, 0, expected_seq_num, buffer.last, 1, 0, "");
+            sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, addr_size);
         } else {
             build_packet(&ack_pkt, 0, expected_seq_num - 1, 0, 1, 0, "");
-            sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, sizeof(client_addr_to));
+            sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, addr_size);
+        }
+
+        while (server_buffer[expected_seq_num].length) {
+            fwrite(server_buffer[expected_seq_num].payload, 1, server_buffer[expected_seq_num].length, fp);
+            expected_seq_num++;
+            if (server_buffer[expected_seq_num].last) {
+                break;
+            }
         }
     }
-
-    
 
     fclose(fp);
     close(listen_sockfd);
