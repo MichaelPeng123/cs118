@@ -4,6 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
+#include <sys/time.h>
 
 #include "utils.h"
 
@@ -72,6 +73,7 @@ int main(int argc, char *argv[]) {
 
     fseek(fp, 0, SEEK_END);
     int file_size = ftell(fp);
+    printf("File size: %d\n", file_size);
     rewind(fp);
 
     struct packet all_packets[file_size / PAYLOAD_SIZE + 1];
@@ -82,22 +84,37 @@ int main(int argc, char *argv[]) {
         bytes_read = fread(buffer, 1, PAYLOAD_SIZE, fp);
         if (bytes_read < PAYLOAD_SIZE) {
             last = 1;
-            build_packet(&pkt, seq_num, ack_num, last, ack, bytes_read, (const char*) buffer);
-            break;
         }
         build_packet(&pkt, seq_num, ack_num, last, ack, bytes_read, (const char*) buffer);
+        sendto(send_sockfd, &pkt, sizeof(pkt), 0, (struct sockaddr *)&server_addr_to, addr_size);
         all_packets[seq_num] = pkt;
+        
+
+        tv.tv_sec = TIMEOUT;
+        tv.tv_usec = 0;
+        if (setsockopt(listen_sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+            perror("Error setting timeout");
+            close(listen_sockfd);
+            close(send_sockfd);
+            return 1;
+        }
+
+        if (recvfrom(listen_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&server_addr_from, &addr_size) < 0) {
+            printf("Timeout\n");
+            continue;
+        } else {
+            printf("Received ACK %d\n", ack_pkt.acknum);
+        }
         seq_num++;
+
+        if (last) {
+            break;
+        }
     }
 
+
+ 
     fclose(fp);
-
-    for (packet packet_to_send : all_packets) {
-        sendto(send_sockfd, &packet_to_send, sizeof(packet_to_send), 0, (struct sockaddr *)&server_addr_to, addr_size);
-    }
-    // packet packet_to_send = all_packets[0];
-    // sendto(send_sockfd, &packet_to_send, sizeof(packet_to_send), 0, (struct sockaddr *)&server_addr_to, addr_size);
-
     close(listen_sockfd);
     close(send_sockfd);
     return 0;

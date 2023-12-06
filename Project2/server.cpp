@@ -50,7 +50,8 @@ int main() {
 
     // Open the target file for writing (always write to output.txt)
     FILE *fp = fopen("output.txt", "wb");
-    printf("receieved packdet\n");
+
+    struct packet server_buffer;
 
     // TODO: Receive file from the client and save it as output.txt
     while (1) {
@@ -60,7 +61,18 @@ int main() {
             close(listen_sockfd);
             close(send_sockfd);
         }
-        printf("%s", buffer.payload);
+        printf("Received packet with seqnum %d\n", buffer.seqnum);
+        if (expected_seq_num == buffer.seqnum) {
+            printf("Writing to file\n");
+            fwrite(buffer.payload, sizeof(char), buffer.length, fp); 
+
+            build_packet(&ack_pkt, 0, expected_seq_num, 0, 1, 0, "");
+            expected_seq_num++;
+            sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, sizeof(client_addr_to));
+        } else {
+            build_packet(&ack_pkt, 0, expected_seq_num - 1, 0, 1, 0, "");
+            sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, sizeof(client_addr_to));
+        }
     }
 
     
