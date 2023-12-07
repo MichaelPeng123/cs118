@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 
 // MACROS
 #define SERVER_IP "127.0.0.1"
@@ -16,7 +17,11 @@
 #define TIMEOUT 2
 #define MAX_SEQUENCE 1024
 
-
+enum state {
+  SLOW_START,
+  CONGESTION_AVOIDANCE,
+  FAST_RECOVERY
+};
 
 // Packet Layout
 // You may change this if you want to
@@ -27,6 +32,7 @@ struct packet {
     char last;
     unsigned int length;
     char payload[PAYLOAD_SIZE];
+    double starttime;
 };
 
 // Utility function to build a packet
@@ -50,5 +56,35 @@ void printSend(struct packet* pkt, int resend) {
     else
         printf("SEND %d %d%s%s\n", pkt->seqnum, pkt->acknum, pkt->last ? " LAST": "", pkt->ack ? " ACK": "");
 }
+
+// delay
+void delay(int number_of_seconds)
+{
+    // Converting time into milli_seconds
+    int milli_seconds = 1000 * number_of_seconds;
+ 
+    // Storing start time
+    clock_t start_time = clock();
+ 
+    // looping till required time is not achieved
+    while (clock() < start_time + milli_seconds);
+}
+
+
+// set timer
+double setStartTime(){
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return tv.tv_sec + tv.tv_usec/1000000.0;
+}
+
+// check timeout
+int timeout(double startTime){
+    struct timeval new_tv;
+    gettimeofday(&new_tv, NULL);
+    double currTime = new_tv.tv_sec + new_tv.tv_usec/1000000.0;
+    return (currTime-startTime >= TIMEOUT);
+}
+
 
 #endif
