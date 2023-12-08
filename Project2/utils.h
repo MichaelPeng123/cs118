@@ -16,6 +16,8 @@
 #define WINDOW_SIZE 5
 #define TIMEOUT 2
 #define MAX_SEQUENCE 1024
+#define REDUCED_WINDOW 32
+#define INITIAL_WINDOW 64
 
 enum state {
   SLOW_START,
@@ -83,7 +85,8 @@ int timeout(double startTime){
     struct timeval new_tv;
     gettimeofday(&new_tv, NULL);
     double currTime = new_tv.tv_sec + new_tv.tv_usec/1000000.0;
-    return (currTime-startTime >= TIMEOUT);
+    if (currTime-startTime >= TIMEOUT) return true;
+    else return false;
 }
 
 

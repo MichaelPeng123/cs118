@@ -9,6 +9,10 @@
 
 #include "utils.h"
 
+#include <cmath>
+using namespace std;
+
+
 int main(int argc, char *argv[]) {
     int listen_sockfd, send_sockfd;
     struct sockaddr_in client_addr, server_addr_to, server_addr_from;
@@ -73,7 +77,6 @@ int main(int argc, char *argv[]) {
 
     // TODO: Read from file, and initiate reliable data transfer to the server
     ssize_t bytes_read;
-    ssize_t bytes_sent;
     ssize_t bytes_received;
 
     // BATCH: get total file len, file remainder size
@@ -105,60 +108,62 @@ int main(int argc, char *argv[]) {
 
     fclose(fp);
 
-
-/* CONGESTION CONTROL*/
-    // set dup ack for fast retransmit
-    int dupCount = 0;
+    int countDups = 0;
     int last_received_ack = -1;
     seq_num = 0;
-    // printf("current seq: %d, start_window: %d, end_window: %d\n", seq_num, start_seq, end_seq);
 
     // set count for number of packets received for congestion avoidance
-    int pack_recv = 0;
     struct packet curr_pkt;
     double startTime;
     enum state STATE = SLOW_START;
-    int cwnd = 1;
-    int ssthresh = 6;
+    double cwnd = 1;
+    int ssthresh = INITIAL_WINDOW;
     int valid_size = 0;
     unsigned short start_seq = 0;
     unsigned short end_seq = cwnd - 1;
     bool empty = false;
 
 
-    
+    // create initial window
+    for(int i = seq_num; i <= end_seq; i ++ ){
+        curr_pkt = packets_window[i];
 
-    if (seq_num >= start_seq && seq_num <= end_seq){
-        for(int i = seq_num; i <= end_seq; i ++ ){
-            curr_pkt = packets_window[i];
-            startTime = setStartTime();
-            curr_pkt.starttime = startTime;
-            // change_packet_start_time(&curr_pkt, startTime);
-            bytes_sent = sendto(send_sockfd, (void *) &curr_pkt, sizeof(curr_pkt), 0, (struct sockaddr*)&server_addr_to, sizeof(server_addr_to));
-            printf("regular packet %d sent\n", curr_pkt.seqnum);
-            packets_window[i] = curr_pkt;
-        }
-        seq_num = end_seq + 1;
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        curr_pkt.starttime = tv.tv_sec + tv.tv_usec/1000000.0;
+
+        sendto(send_sockfd, (void *) &curr_pkt, sizeof(curr_pkt), 0, (struct sockaddr*)&server_addr_to, sizeof(server_addr_to));
+        printf("regular packet %d sent\n", curr_pkt.seqnum);
+        packets_window[i] = curr_pkt;
     }
+    seq_num = end_seq + 1;
 
     fcntl(listen_sockfd, F_SETFL, O_NONBLOCK);
     int timeout_count = 0;
-    while(1){
+    while (1) {
         if (last_received_ack >= num_packets-1) {
             break;
         }
-        if(timeout(packets_window[start_seq].starttime))
+        // see if current packet has timeedout
+        struct timeval new_tv;
+        gettimeofday(&new_tv, NULL);
+        double currTime = new_tv.tv_sec + new_tv.tv_usec/1000000.0;
+        if (currTime-packets_window[start_seq].starttime >= TIMEOUT)
         {
-            pack_recv = 0;
-            ssthresh = std::max(cwnd/2, 2);
+            
             cwnd = 1;
+            ssthresh = std::max(int(floor(cwnd))/2, REDUCED_WINDOW);
+            
             // retransmit lost packet
             curr_pkt = packets_window[start_seq];
+            
             // reset timer
-            startTime = setStartTime();
-            curr_pkt.starttime = startTime;
-            // change_packet_start_time(&curr_pkt, startTime);
-            bytes_sent = sendto(send_sockfd, (void *) &curr_pkt, sizeof(curr_pkt), 0, (struct sockaddr*)&server_addr_to, sizeof(server_addr_to));
+            struct timeval tv;
+            gettimeofday(&tv, NULL);
+            curr_pkt.starttime = tv.tv_sec + tv.tv_usec/1000000.0;
+
+            // resend ack
+            sendto(send_sockfd, (void *) &curr_pkt, sizeof(curr_pkt), 0, (struct sockaddr*)&server_addr_to, sizeof(server_addr_to));
             printf("timeout! lost packet %d sent\n", curr_pkt.seqnum);
             packets_window[start_seq] = curr_pkt;
             // change the current window range
@@ -166,15 +171,26 @@ int main(int argc, char *argv[]) {
         
             STATE = SLOW_START;
         }
-        if (bytes_received = recvfrom(listen_sockfd, (void *) &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr*)&client_addr, &addr_size)>0){
+
+        ssize_t bytes_received = recvfrom(listen_sockfd, (void *) &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr*)&client_addr, &addr_size);
+
+        if (bytes_received == -1) {
+            continue;
+        }
+        
+        if (bytes_received > 0){
             printf("last ack:%d curr ack:%d starting seq:%d\n", last_received_ack, ack_pkt.acknum, start_seq);
-            if(ack_pkt.acknum==last_received_ack)
+
+            int curr_pkt_num = ack_pkt.acknum;
+
+
+            if(curr_pkt_num==last_received_ack)
             {
-                dupCount += 1;
-                printf("dup ack!!!! %d\n",dupCount);
+                countDups += 1;
+                printf("dup ack!!!! %d\n",countDups);
 
             } else {
-                dupCount = 0;
+                countDups = 0;
                 // fast recovery on unacked pkt
                 if(STATE==FAST_RECOVERY)
                 {
@@ -186,124 +202,110 @@ int main(int argc, char *argv[]) {
             last_received_ack = ack_pkt.acknum;
 
             // if three duplicated acks, go to fast retransimit
-            if(dupCount==3)
+            if(countDups == 3)
             {
                 curr_pkt = packets_window[last_received_ack];
 
                 // reset the timer and resend 
                 startTime = setStartTime();
                 curr_pkt.starttime = startTime;
-                // change_packet_start_time(&curr_pkt, startTime);
-                bytes_sent = sendto(send_sockfd, (void *) &curr_pkt, sizeof(curr_pkt), 0, (struct sockaddr*)&server_addr_to, sizeof(server_addr_to));
+                sendto(send_sockfd, (void *) &curr_pkt, sizeof(curr_pkt), 0, (struct sockaddr*)&server_addr_to, sizeof(server_addr_to));
                 packets_window[last_received_ack] = curr_pkt;
 
                 // reset ssthresh and cwnd
-                ssthresh = std::max(cwnd/2, 2);
-                cwnd = ssthresh + 3;
-
                 STATE = FAST_RECOVERY;
-                pack_recv = 0;
+                ssthresh = std::max(int(floor(cwnd))/2, 32);
+                cwnd = ssthresh + 3;
             }
 
-            
-
-            if(STATE==FAST_RECOVERY)
+            if (STATE==FAST_RECOVERY)
             {
                 cwnd += 1;
 
                 // change the window range
                 start_seq = last_received_ack;
-                end_seq = start_seq + (cwnd - 1);
+                end_seq = start_seq + (int(floor(cwnd)) - 1);
                 if (end_seq >= num_packets){
                     end_seq = num_packets - 1;
                 }
 
-                if (seq_num >= start_seq && seq_num <= end_seq){
+                if (seq_num >= start_seq){
                     for(int i = seq_num; i <= end_seq; i ++ ){
                         curr_pkt = packets_window[i];
-                        startTime = setStartTime();
-                        curr_pkt.starttime = startTime;
-                        // change_packet_start_time(&curr_pkt, startTime);
-                        bytes_sent = sendto(send_sockfd, (void *) &curr_pkt, sizeof(curr_pkt), 0, (struct sockaddr*)&server_addr_to, sizeof(server_addr_to));
-                        packets_window[i] = curr_pkt;
 
+                        struct timeval tv;
+                        gettimeofday(&tv, NULL);
+                        curr_pkt.starttime = tv.tv_sec + tv.tv_usec/1000000.0;
+
+                        sendto(send_sockfd, (void *) &curr_pkt, sizeof(curr_pkt), 0, (struct sockaddr*)&server_addr_to, sizeof(server_addr_to));
                         printf("regular packet %d sent\n", curr_pkt.seqnum);
-                        printf("state: FAST RECOVERY curr cwnd: %d seqnum:%d startseq:%d\n", cwnd, seq_num, start_seq);
+                        packets_window[i] = curr_pkt;
                     }
                     seq_num = end_seq + 1;
                 }
-                
             }
-            else if(ack_pkt.acknum > start_seq) {
 
-                if(STATE == SLOW_START)
-                {
+            else if (STATE == SLOW_START ) {
+                if(ack_pkt.acknum > start_seq) {
                     cwnd += 1;
-                    
+                        
                     // TODO: create 2 packets and send + reset timer
                     start_seq = ack_pkt.acknum;
-                    end_seq = start_seq + (cwnd - 1);
+                    end_seq = start_seq + (int(floor(cwnd)) - 1);
                     if (end_seq >= num_packets){
                         end_seq = num_packets - 1;
                     }
-                    printf("state: SLOW START curr cwnd: %d seq num:%d start:%d end:%d\n", cwnd, seq_num,start_seq,end_seq);
-                    if (seq_num >= start_seq && seq_num <= end_seq){
+                    printf("state: SLOW START curr cwnd: %d seq num:%d start:%d end:%d\n", int(floor(cwnd)), seq_num,start_seq,end_seq);
+                    if (seq_num >= start_seq){
                         for(int i = seq_num; i <= end_seq; i ++ ){
                             curr_pkt = packets_window[i];
-                            startTime = setStartTime();
-                            curr_pkt.starttime = startTime;
-                            // change_packet_start_time(&curr_pkt, startTime);
-                            bytes_sent = sendto(send_sockfd, (void *) &curr_pkt, sizeof(curr_pkt), 0, (struct sockaddr*)&server_addr_to, sizeof(server_addr_to));
+
+                            struct timeval tv;
+                            gettimeofday(&tv, NULL);
+                            curr_pkt.starttime = tv.tv_sec + tv.tv_usec/1000000.0;
+
+                            sendto(send_sockfd, (void *) &curr_pkt, sizeof(curr_pkt), 0, (struct sockaddr*)&server_addr_to, sizeof(server_addr_to));
                             printf("regular packet %d sent\n", curr_pkt.seqnum);
                             packets_window[i] = curr_pkt;
-                            // printf("this pkt start at %d\n", packets_window[i].starttime);
                         }
                         seq_num = end_seq + 1;
                     }
-                    // end of TODO
-                    if(cwnd>ssthresh)
+                    if(int(floor(cwnd))>ssthresh)
                     {
-                        pack_recv = 0;
                         STATE = CONGESTION_AVOIDANCE;
                         printf("entering congestion avoidance\n");
                     }
                 }
-                else if(STATE == CONGESTION_AVOIDANCE)
-                {
-                    // cwnd +=1 for every RTT
-                    // when to reset pack_recv?
-                    pack_recv += 1;
-                    if(pack_recv==cwnd)
-                    {
-                        cwnd += 1;
-                        pack_recv = 0;
-                        // TODO: create packet and send + reset timer
-                    }
-                    printf("state: CONGESTION AVOIDANCE curr cwnd: %d pack recv:%d\n", cwnd, pack_recv);
+
+            }
+            else if (STATE == CONGESTION_AVOIDANCE) {
+                if(ack_pkt.acknum > start_seq) {
+                    cwnd += (1/cwnd);
+                    printf("state: CONGESTION AVOIDANCE curr cwnd: %d pack recv:%d\n", cwnd);
 
                     // TODO: create packet and send + reset timer
                     start_seq = ack_pkt.acknum;
-                    end_seq = start_seq + (cwnd - 1);
+                    end_seq = start_seq + (int(floor(cwnd)) - 1);
                     if (end_seq >= num_packets){
                         end_seq = num_packets - 1;
                     }
                     
-                    if (seq_num >= start_seq && seq_num <= end_seq){
+                    if (seq_num >= start_seq){
                         for(int i = seq_num; i <= end_seq; i ++ ){
                             curr_pkt = packets_window[i];
-                            startTime = setStartTime();
-                            curr_pkt.starttime = startTime;
-                            // change_packet_start_time(&curr_pkt, startTime);
-                            bytes_sent = sendto(send_sockfd, (void *) &curr_pkt, sizeof(curr_pkt), 0, (struct sockaddr*)&server_addr_to, sizeof(server_addr_to));
+
+                            struct timeval tv;
+                            gettimeofday(&tv, NULL);
+                            curr_pkt.starttime = tv.tv_sec + tv.tv_usec/1000000.0;
+
+                            sendto(send_sockfd, (void *) &curr_pkt, sizeof(curr_pkt), 0, (struct sockaddr*)&server_addr_to, sizeof(server_addr_to));
                             printf("regular packet %d sent\n", curr_pkt.seqnum);
                             packets_window[i] = curr_pkt;
-                            // printf("this pkt start at %d\n", packets_window[i].starttime); 
                         }
                         seq_num = end_seq + 1;
                     }
                 }
-                
-            } 
+            }                 
         }
         
     }

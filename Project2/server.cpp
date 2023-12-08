@@ -70,46 +70,69 @@ int main() {
 
     while (1) {
         struct packet pkt;
-        if (recvfrom(listen_sockfd, (void *) &pkt, sizeof(pkt), 0, (struct sockaddr*)&server_addr, &addr_size) > 0) {
-            // if seq number is prev_ack's next or starting new file
-            int received_seq = pkt.seqnum;
-            if (received_seq != expected_seq) {
-                if (pkt.seqnum > expected_seq){
-                    done[pkt.seqnum] = 1;
-                    buffer[pkt.seqnum] = pkt;
-                }
-                // send previous ack number back 
-                filler_pkt.acknum = expected_seq;
-                printf("wrong seq received -- expected: %d received: %d\n", expected_seq, pkt.seqnum);
-                sendto(send_sockfd, &filler_pkt, sizeof(filler_pkt), 0, (struct sockaddr *)&client_addr_to, sizeof(client_addr_to));
+        if (recvfrom(listen_sockfd, &pkt, sizeof(pkt), 0, (struct sockaddr *)&server_addr, &addr_size) == -1) {
+            perror("Error retrieving packet");
+            close(listen_sockfd);
+            close(send_sockfd);
+            break;
+        }
+        
+        // if seq number is prev_ack's next or starting new file
+        int received_seq = pkt.seqnum;
+        if (received_seq != expected_seq) {
+            if (pkt.seqnum > expected_seq){
+                done[pkt.seqnum] = 1;
+                buffer[pkt.seqnum] = pkt;
+            }
+            // send previous ack number back 
+            filler_pkt.acknum = expected_seq;
+            while (expected_seq < max_window){
+                if (done[expected_seq] != 1) break;
+                packet current = buffer[expected_seq];
+                fwrite(current.payload, 1, current.length, fp);
+                if(current.last)
+                {
+                    filler_pkt.last = 1;
+                    sendto(send_sockfd, &filler_pkt, sizeof(filler_pkt), 0, (struct sockaddr *)&client_addr_to, sizeof(client_addr_to));
+                    
+                    close(send_sockfd);
+                    close(listen_sockfd);
+                    fclose(fp);
 
-            }
-            else {
-                printf("correct seq received -- value: %d\n", pkt.seqnum);
-                int increment_prog = expected_seq;
-                done[increment_prog] = 1;
-                buffer[increment_prog] = pkt;
-                // move forward received values
-                while (increment_prog < max_window){
-                    if (done[increment_prog] != 1) break;
-                    cur_packet = buffer[increment_prog];
-                    fwrite(cur_packet.payload, 1, cur_packet.length, fp);
-                    if(cur_packet.last)
-                    {
-                        filler_pkt.last= 1;
-                        sendto(send_sockfd, &filler_pkt, sizeof(filler_pkt), 0, (struct sockaddr *)&client_addr_to, sizeof(client_addr_to));
-                        fclose(fp);
-                        close(listen_sockfd);
-                        close(send_sockfd);
-                        return EXIT_SUCCESS;
-                    }
-                    increment_prog += 1;
+                    break;
                 }
-                expected_seq = increment_prog;
-                filler_pkt.acknum = increment_prog;
-                sendto(send_sockfd, &filler_pkt, sizeof(filler_pkt), 0, (struct sockaddr *)&client_addr_to, sizeof(client_addr_to));
-                printf("ack sent: %d\n", filler_pkt.acknum);
+                expected_seq += 1;
             }
+
+            sendto(send_sockfd, &filler_pkt, sizeof(filler_pkt), 0, (struct sockaddr *)&client_addr_to, sizeof(client_addr_to));
+            printf("dup ack sent: %d\n", filler_pkt.acknum);
+
+        }
+        else {
+            done[expected_seq] = 1;
+            buffer[expected_seq] = pkt;
+            // move forward received values
+            while (expected_seq < max_window){
+                if (done[expected_seq] != 1) break;
+                packet current = buffer[expected_seq];
+                fwrite(current.payload, 1, current.length, fp);
+                if(current.last)
+                {
+                    filler_pkt.last = 1;
+                    sendto(send_sockfd, &filler_pkt, sizeof(filler_pkt), 0, (struct sockaddr *)&client_addr_to, sizeof(client_addr_to));
+                    
+                    close(send_sockfd);
+                    close(listen_sockfd);
+                    fclose(fp);
+
+                    break;
+                }
+                expected_seq += 1;
+            }
+
+            filler_pkt.acknum = expected_seq;
+            sendto(send_sockfd, &filler_pkt, sizeof(filler_pkt), 0, (struct sockaddr *)&client_addr_to, sizeof(client_addr_to));
+            printf("ack sent: %d\n", filler_pkt.acknum);
         }
     }   
 
