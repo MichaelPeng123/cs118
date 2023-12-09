@@ -1,4 +1,4 @@
-CC=gcc
+CC=g++
 CFLAGS=-Wall -Wextra -Werror
 
 all: clean build
@@ -6,8 +6,8 @@ all: clean build
 default: build
 
 build: server.cpp client.cpp
-	gcc -Wall -Wextra -o server server.cpp
-	gcc -Wall -Wextra -o client client.cpp
+	g++ -Wall -Wextra -o server server.cpp
+	g++ -Wall -Wextra -o client client.cpp
 
 clean:
 	rm -f server client output.txt project2.zip

@@ -10,10 +10,9 @@ int main() {
     int listen_sockfd, send_sockfd;
     struct sockaddr_in server_addr, client_addr_from, client_addr_to;
     struct packet buffer;
+    struct packet ack_pkt;
     socklen_t addr_size = sizeof(client_addr_from);
     int expected_seq_num = 0;
-    int recv_len;
-    struct packet ack_pkt;
 
     // Create a UDP socket for sending
     send_sockfd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -50,40 +49,52 @@ int main() {
 
     // Open the target file for writing (always write to output.txt)
     FILE *fp = fopen("output.txt", "wb");
-
     struct packet server_buffer[BUFFER_SIZE];
 
     // TODO: Receive file from the client and save it as output.txt
-    while (1) {
+    while (true) {
         if (recvfrom(listen_sockfd, &buffer, sizeof(buffer), 0, (struct sockaddr *)&client_addr_from, &addr_size) == -1) {
             perror("Error retrieving packet");
+            fclose(fp);
             close(listen_sockfd);
             close(send_sockfd);
+            return 1;
         }
-        printf("Received packet with seqnum %d\n", buffer.seqnum);
         server_buffer[buffer.seqnum] = buffer;
+        printf("Received packet %d\n", buffer.seqnum);
         if (expected_seq_num == buffer.seqnum) {
-            build_packet(&ack_pkt, 0, expected_seq_num, buffer.last, 1, 0, "");
-            sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, addr_size);
-        } else {
-            build_packet(&ack_pkt, 0, expected_seq_num - 1, 0, 1, 0, "");
-            sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, addr_size);
-        }
-
-        while (server_buffer[expected_seq_num].length) {
-            fwrite(server_buffer[expected_seq_num].payload, 1, server_buffer[expected_seq_num].length, fp);
-            
-            printf("Wrote packet with seqnum %d\n", server_buffer[expected_seq_num].seqnum);
-            if (server_buffer[expected_seq_num].last) {
+            while (server_buffer[expected_seq_num].length > 0) {
+                fwrite(server_buffer[expected_seq_num].payload, 1, server_buffer[expected_seq_num].length, fp);
+                printf("Wrote packet %d\n", expected_seq_num);
+                if (server_buffer[expected_seq_num].last) {
+                    fclose(fp);
+                    close(listen_sockfd);
+                    close(send_sockfd);
+                    return 0;
+                }
+                expected_seq_num++;
+            }
+            build_packet(&ack_pkt, 0, expected_seq_num - 1, buffer.last, 1, 0, "");
+            printf("Sending ACK %d\n", expected_seq_num - 1);
+            if (sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, addr_size) < 0) {
                 fclose(fp);
+                perror("Error sending packet");
                 close(listen_sockfd);
                 close(send_sockfd);
-                return 0;
+                return 1;
             }
-            expected_seq_num++;
+        } else {
+            build_packet(&ack_pkt, 0, expected_seq_num, 0, 1, 0, "");
+            printf("Sending retransmit ACK %d\n", expected_seq_num);
+            if (sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, addr_size) < 0) {
+                fclose(fp);
+                perror("Error sending packet");
+                close(listen_sockfd);
+                close(send_sockfd);
+                return 1;
+            }
         }
     }
-
     fclose(fp);
     close(listen_sockfd);
     close(send_sockfd);
