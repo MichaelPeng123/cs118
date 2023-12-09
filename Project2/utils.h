@@ -18,7 +18,7 @@
 #define MAX_SEQUENCE 1024
 #define BUFFER_SIZE 4096
 
-#define SSTHRESH_INIT 5
+#define SSTHRESH_INIT 64
 #define CWND_INIT 1
 
 // Packet Layout

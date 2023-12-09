@@ -23,7 +23,7 @@ int main(int argc, char *argv[]) {
     int last_sent = 0;
 
     int ssthresh = SSTHRESH_INIT;
-    int cwnd = CWND_INIT;
+    double cwnd = CWND_INIT;
     int num_dupes = 0;
     int new_ssthresh;
 
@@ -178,7 +178,7 @@ int main(int argc, char *argv[]) {
                     num_dupes = 0;
                     if (cwnd > ssthresh) {
                         // congestion avoidance
-                        cwnd += std::floor(1.0 / cwnd);
+                        cwnd += (1.0 / cwnd);
                     } else {
                         // slow start
                         cwnd += 1;
@@ -217,7 +217,7 @@ int main(int argc, char *argv[]) {
                         }
                     } else if (num_dupes > 3) {
                         // fast recovery -> fast recovery
-                        cwnd++;
+                        cwnd+=1;
                     }
                 }
             }
