@@ -20,6 +20,7 @@ int main(int argc, char *argv[]) {
     unsigned short ack_num = 0;
     char last = 0;
     char ack = 0;
+    int last_sent = 0;
 
     int ssthresh = SSTHRESH_INIT;
     int cwnd = CWND_INIT;
@@ -28,7 +29,7 @@ int main(int argc, char *argv[]) {
 
     // read filename from command line argument
     if (argc != 2) {
-        printf("Usage: ./client <filename>\n");
+        // printf("Usage: ./client <filename>\n");
         return 1;
     }
     char *filename = argv[1];
@@ -81,7 +82,7 @@ int main(int argc, char *argv[]) {
 
     struct packet client_buffer[file_size / PAYLOAD_SIZE + 1];
     tv.tv_sec = 0;
-    tv.tv_usec = 200000;
+    tv.tv_usec = 300000;
 
     int read_pkt = 0;
     while (read_pkt < file_size / PAYLOAD_SIZE + 1) {
@@ -101,17 +102,21 @@ int main(int argc, char *argv[]) {
     while (true) {
         // send packets
         int send_pkt = ack_num;
+        // printf("Sending window: %d - %d\n", ack_num, ack_num + cwnd - 1);
         while (send_pkt < ack_num + cwnd && send_pkt < file_size / PAYLOAD_SIZE + 1) {
-            printf("Sending packet %d\n", send_pkt);
-            if (sendto(send_sockfd, &client_buffer[send_pkt], sizeof(client_buffer[send_pkt]), 0, (struct sockaddr *)&server_addr_to, addr_size) < 0) {
-                perror("Error sending packet");
-                fclose(fp);
-                close(listen_sockfd);
-                close(send_sockfd);
-                return 1;
-            }
-            if (client_buffer[send_pkt].last == 1) {
-                break;
+            // printf("Sending packet %d\n", send_pkt);
+            if (send_pkt > last_sent) {
+                last_sent = send_pkt;
+                if (sendto(send_sockfd, &client_buffer[send_pkt], sizeof(client_buffer[send_pkt]), 0, (struct sockaddr *)&server_addr_to, addr_size) < 0) {
+                    perror("Error sending packet");
+                    fclose(fp);
+                    close(listen_sockfd);
+                    close(send_sockfd);
+                    return 1;
+                }
+                if (client_buffer[send_pkt].last == 1) {
+                    break;
+                }
             }
             send_pkt++;
         }
@@ -126,10 +131,9 @@ int main(int argc, char *argv[]) {
         }
         // handle acks and duplicates
         while (true) {
-            printf("ssthresh = %d, cwnd = %d\n", ssthresh, cwnd);
-            if (recvfrom(listen_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&server_addr_from, &addr_size) <= 0) {
+            if (recvfrom(listen_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&server_addr_from, &addr_size) < 0) {
                 // timeout, reset to slow start
-                printf("Timeout waiting for: %d\n", ack_num);
+                // printf("Timeout, threshold & window = %d, %d\n", ssthresh, cwnd);
                 new_ssthresh = std::floor(cwnd / 2);
                 if (new_ssthresh < 2) {
                     ssthresh = 2;
@@ -140,8 +144,8 @@ int main(int argc, char *argv[]) {
                 num_dupes = 0;
                 
                 // resend packet
-                printf("Resending packet %d\n", ack_num);
                 if (ack_num <= 0) {
+                    // printf("Resending packet %d\n", 0);
                     if (sendto(send_sockfd, &client_buffer[0], sizeof(client_buffer[0]), 0, (struct sockaddr *)&server_addr_to, addr_size) < 0) {
                         fclose(fp);
                         perror("Error sending packet");
@@ -150,6 +154,7 @@ int main(int argc, char *argv[]) {
                         return 1;
                     }
                 } else {
+                    // printf("Resending packet %d\n", ack_num - 1);
                     if (sendto(send_sockfd, &client_buffer[ack_num - 1], sizeof(client_buffer[ack_num - 1]), 0, (struct sockaddr *)&server_addr_to, addr_size) < 0) {
                         fclose(fp);
                         perror("Error sending packet");
@@ -160,7 +165,8 @@ int main(int argc, char *argv[]) {
                 }
                 break;
             } else {
-                if (ack_pkt.last == 1) {
+                // printf("Received ACK %d\n", ack_pkt.acknum);
+                if (ack_pkt.last) {
                     fclose(fp);
                     close(listen_sockfd);
                     close(send_sockfd);
@@ -175,7 +181,7 @@ int main(int argc, char *argv[]) {
                         cwnd += std::floor(1.0 / cwnd);
                     } else {
                         // slow start
-                        cwnd *= 2;
+                        cwnd += 1;
                     }
                     break;
                 } else {
@@ -193,7 +199,8 @@ int main(int argc, char *argv[]) {
                         num_dupes = 0;
 
                         // resend packet
-                        if (sendto(send_sockfd, &client_buffer[ack_pkt.acknum - 1], sizeof(client_buffer[ack_pkt.acknum - 1]), 0, (struct sockaddr *)&server_addr_to, addr_size) < 0) {
+                        // printf("Resending packet via dupes %d\n", ack_pkt.acknum - 1);
+                        if (sendto(send_sockfd, &client_buffer[ack_pkt.acknum], sizeof(client_buffer[ack_pkt.acknum]), 0, (struct sockaddr *)&server_addr_to, addr_size) < 0) {
                             perror("Error sending packet");
                             fclose(fp);
                             close(listen_sockfd);
