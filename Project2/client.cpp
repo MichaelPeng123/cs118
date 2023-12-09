@@ -112,6 +112,7 @@ int main(int argc, char *argv[]) {
     int last_received_ack = -1;
     seq_num = 0;
 
+
     // set count for number of packets received for congestion avoidance
     struct packet curr_pkt;
     double startTime;
