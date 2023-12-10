@@ -19,7 +19,7 @@
 #define BUFFER_SIZE 4096
 
 #define SSTHRESH_INIT 5
-#define CWND_INIT 1
+#define CWND_INIT 1.0
 
 // Packet Layout
 // You may change this if you want to

@@ -5,9 +5,9 @@
 #include <unistd.h>
 #include <time.h>
 #include <cmath>
+#include <algorithm>
 
 #include "utils.h"
-
 
 int main(int argc, char *argv[]) {
     int listen_sockfd, send_sockfd;
@@ -23,7 +23,7 @@ int main(int argc, char *argv[]) {
     int last_sent = 0;
 
     int ssthresh = SSTHRESH_INIT;
-    int cwnd = CWND_INIT;
+    float cwnd = CWND_INIT;
     int num_dupes = 0;
     int new_ssthresh;
 
@@ -82,12 +82,12 @@ int main(int argc, char *argv[]) {
 
     struct packet client_buffer[file_size / PAYLOAD_SIZE + 1];
     tv.tv_sec = 0;
-    tv.tv_usec = 300000;
+    tv.tv_usec = 200000;
 
     int read_pkt = 0;
-    while (read_pkt < file_size / PAYLOAD_SIZE + 1) {
-        int bytes_read = fread(buffer, 1, PAYLOAD_SIZE, fp);
-        if (bytes_read < PAYLOAD_SIZE) {
+    int bytes_read;
+    while (read_pkt < file_size / PAYLOAD_SIZE + 1) {   // read packets into the client's buffer
+        if ((bytes_read = fread(buffer, 1, PAYLOAD_SIZE, fp)) < PAYLOAD_SIZE) {
             last = 1;
             buffer[bytes_read] = '\0';
         }
@@ -102,10 +102,10 @@ int main(int argc, char *argv[]) {
     while (true) {
         // send packets
         int send_pkt = ack_num;
-        // printf("Sending window: %d - %d\n", ack_num, ack_num + cwnd - 1);
+        // printf("Sending window: %d - %f\n", ack_num, ack_num + cwnd - 1);
         while (send_pkt < ack_num + cwnd && send_pkt < file_size / PAYLOAD_SIZE + 1) {
             // printf("Sending packet %d\n", send_pkt);
-            if (send_pkt > last_sent) {
+            if (send_pkt > last_sent) { // prevent sending duplicate packets
                 last_sent = send_pkt;
                 if (sendto(send_sockfd, &client_buffer[send_pkt], sizeof(client_buffer[send_pkt]), 0, (struct sockaddr *)&server_addr_to, addr_size) < 0) {
                     perror("Error sending packet");
@@ -133,18 +133,13 @@ int main(int argc, char *argv[]) {
         while (true) {
             if (recvfrom(listen_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&server_addr_from, &addr_size) < 0) {
                 // timeout, reset to slow start
-                // printf("Timeout, threshold & window = %d, %d\n", ssthresh, cwnd);
-                new_ssthresh = std::floor(cwnd / 2);
-                if (new_ssthresh < 2) {
-                    ssthresh = 2;
-                } else {
-                    ssthresh = new_ssthresh;
-                }
-                cwnd = 1;
+                // printf("Timeout, threshold & window = %d, %f\n", ssthresh, cwnd);
+                ssthresh = (int) std::fmax(std::floor(cwnd / 2), 2);
+                cwnd = CWND_INIT;
                 num_dupes = 0;
                 
                 // resend packet
-                if (ack_num <= 0) {
+                if (ack_num <= 0) { // resend packet 0 if missing ack is 0
                     // printf("Resending packet %d\n", 0);
                     if (sendto(send_sockfd, &client_buffer[0], sizeof(client_buffer[0]), 0, (struct sockaddr *)&server_addr_to, addr_size) < 0) {
                         fclose(fp);
@@ -153,7 +148,7 @@ int main(int argc, char *argv[]) {
                         close(send_sockfd);
                         return 1;
                     }
-                } else {
+                } else { // otherwise resend packet before missing ack
                     // printf("Resending packet %d\n", ack_num - 1);
                     if (sendto(send_sockfd, &client_buffer[ack_num - 1], sizeof(client_buffer[ack_num - 1]), 0, (struct sockaddr *)&server_addr_to, addr_size) < 0) {
                         fclose(fp);
@@ -166,40 +161,49 @@ int main(int argc, char *argv[]) {
                 break;
             } else {
                 // printf("Received ACK %d\n", ack_pkt.acknum);
-                if (ack_pkt.last) {
+                if (ack_pkt.last) { // return if the ack for the last packet is received
                     fclose(fp);
                     close(listen_sockfd);
                     close(send_sockfd);
                     return 0;
                 }
-                if (ack_pkt.acknum >= ack_num) { 
-                    // new ack received
+                if (ack_pkt.acknum >= ack_num) { // new ack received
                     ack_num = ack_pkt.acknum + 1;
                     num_dupes = 0;
-                    if (cwnd > ssthresh) {
-                        // congestion avoidance
-                        cwnd += std::floor(1.0 / cwnd);
-                    } else {
-                        // slow start
-                        cwnd += 1;
+                    if (cwnd > ssthresh) {  // congestion avoidance
+                        cwnd += (1.0 / cwnd);
+                    } else {    // slow start
+                        cwnd *= 2;
                     }
                     break;
-                } else {
-                    // duplicate ack received
+                } else { // duplicate ack received
                     num_dupes++;
                     if (num_dupes == 3) {
-                        // move to fast recovery
-                        new_ssthresh = std::floor(cwnd / 2);
-                        if (new_ssthresh < 2) {
-                            ssthresh = 2;
-                        } else {
-                            ssthresh = new_ssthresh;
-                        }
-                        cwnd = std::floor(ssthresh + 3);
+                        // reset values
+                        ssthresh = (int) std::fmax(std::floor(cwnd / 2), 2);
+                        cwnd = ssthresh + 3;
                         num_dupes = 0;
 
                         // resend packet
                         // printf("Resending packet via dupes %d\n", ack_pkt.acknum - 1);
+                        if (sendto(send_sockfd, &client_buffer[ack_pkt.acknum], sizeof(client_buffer[ack_pkt.acknum]), 0, (struct sockaddr *)&server_addr_to, addr_size) < 0) {
+                            perror("Error sending packet");
+                            fclose(fp);
+                            close(listen_sockfd);
+                            close(send_sockfd);
+                            return 1;
+                        }
+                        // reset timeout
+                        if (setsockopt(listen_sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv) < 0) {
+                            perror("Error setting timeout");
+                            fclose(fp);
+                            close(listen_sockfd);
+                            close(send_sockfd);
+                            return 1;
+                        }
+                    } else if (num_dupes > 3) { // fast recovery -> fast recovery
+                        cwnd++; // additive increase
+                        // printf("Resending packet via dupes %d\n", ack_pkt.acknum);
                         if (sendto(send_sockfd, &client_buffer[ack_pkt.acknum], sizeof(client_buffer[ack_pkt.acknum]), 0, (struct sockaddr *)&server_addr_to, addr_size) < 0) {
                             perror("Error sending packet");
                             fclose(fp);
@@ -215,9 +219,6 @@ int main(int argc, char *argv[]) {
                             close(send_sockfd);
                             return 1;
                         }
-                    } else if (num_dupes > 3) {
-                        // fast recovery -> fast recovery
-                        cwnd++;
                     }
                 }
             }

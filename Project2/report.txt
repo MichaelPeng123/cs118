@@ -1,2 +1,26 @@
 Please concisely describe your congestion control scheme here.
 No need to be verbose, brief descriptions/bullet points are preferred.
+
+On reception of an ACK, determine whether or not it is a new ACK, or a dupe.
+    - New ACK (the ACK number >= the last one we are expecting)
+        - Update the next expected ACK and reset the dupe number
+        - If cwnd > ssthresh, then we are in congestion avoidance
+            - Add 1 / cwnd to cwnd
+        - Otherwise we can continue to exponential slow start 
+            - Multiply cwnd by 2
+    - Duplicate ACK
+        - Increment the dupe counter
+        - If the number of dupes == 3
+            - Set ssthresh to max(2, cwnd/2)
+            - Cwnd = ssthresh + 3
+            - Reset duplicate count
+            - Retransmit the last packet
+        - If dupe number > 3, then we stay in the fast recovery stage
+            - Increment cwnd by 1 (additive increase)
+            - Retransmit the last packet
+    - On timeout
+        - Set ssthresh to max(2, cwnd/2)
+        - Cwnd = 1
+        - Reset duplicate count
+        - Retransmit the last packet
+

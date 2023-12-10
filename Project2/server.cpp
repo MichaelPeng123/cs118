@@ -60,10 +60,10 @@ int main() {
             close(send_sockfd);
             return 1;
         }
-        // // printf("expecting packet %d, received packet %d\n", expected_seq_num, buffer.seqnum);
+        // printf("expecting packet %d, received packet %d\n", expected_seq_num, buffer.seqnum);
 
+        server_buffer[buffer.seqnum] = buffer;
         if (expected_seq_num == buffer.seqnum) {
-            server_buffer[expected_seq_num] = buffer;
             while (server_buffer[expected_seq_num].length > 0) {
                 // printf("Writing packet %d\n", expected_seq_num);
                 fwrite(server_buffer[expected_seq_num].payload, 1, server_buffer[expected_seq_num].length, fp);
@@ -84,10 +84,8 @@ int main() {
                 close(send_sockfd);
                 return 1;
             }
-
         } else {
-            server_buffer[buffer.seqnum] = buffer;
-            build_packet(&ack_pkt, 0, expected_seq_num, 0, 1, 0, "");
+            build_packet(&ack_pkt, 0, expected_seq_num, buffer.last, 1, 0, "");
             // printf("Sending retransmit ACK %d\n", expected_seq_num);
             if (sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, addr_size) < 0) {
                 fclose(fp);
@@ -97,7 +95,6 @@ int main() {
                 return 1;
             }
         }
-        // printf("\n");
     }
     fclose(fp);
     close(listen_sockfd);
